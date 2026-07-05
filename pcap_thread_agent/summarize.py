@@ -53,9 +53,13 @@ def summarize_thread(thread: Thread) -> str:
     return response.content[0].text.strip()
 
 
+def llm_available() -> bool:
+    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
 def summarize_threads(threads: list[Thread]) -> None:
     """Populates thread.narrative in place; raises if ANTHROPIC_API_KEY is missing."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    if not llm_available():
         raise RuntimeError(
             "ANTHROPIC_API_KEY is not set. Export it before running, or pass --no-llm "
             "to generate a report with heuristic evidence only."

@@ -14,7 +14,7 @@ from .detectors import run_all_detectors
 from .flows import build_flows
 from .models import Thread
 from .report import generate_markdown_report
-from .summarize import summarize_threads
+from .summarize import llm_available, summarize_threads
 from .tshark_runner import extract_packets, find_tshark
 
 MAX_UPLOAD_BYTES = int(os.environ.get("PCAP_AGENT_MAX_UPLOAD_BYTES", 200 * 1024 * 1024))
@@ -78,8 +78,8 @@ def health():
     try:
         tshark_path = find_tshark()
     except FileNotFoundError as e:
-        return {"status": "degraded", "tshark": str(e)}
-    return {"status": "ok", "tshark": tshark_path}
+        return {"status": "degraded", "tshark": str(e), "narration_available": llm_available()}
+    return {"status": "ok", "tshark": tshark_path, "narration_available": llm_available()}
 
 
 @app.post("/analyze")
@@ -100,11 +100,10 @@ async def analyze(
 
         threads = run_all_detectors(flows)
 
-        if threads and narrate:
-            try:
-                summarize_threads(threads)
-            except RuntimeError as e:
-                raise HTTPException(status_code=500, detail=str(e))
+        narration_used = False
+        if threads and narrate and llm_available():
+            summarize_threads(threads)
+            narration_used = True
 
         if format == "markdown":
             return PlainTextResponse(generate_markdown_report(threads, source_file=file.filename or "capture"))
@@ -112,6 +111,7 @@ async def analyze(
         return {
             "source_file": file.filename,
             "thread_count": len(threads),
+            "narration_used": narration_used,
             "threads": [_serialize_thread(t) for t in threads],
         }
     finally:
