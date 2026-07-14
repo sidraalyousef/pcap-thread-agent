@@ -1,7 +1,7 @@
 """HTTP API wrapping the pcap analysis pipeline for a frontend (e.g. a Lovable app) to call.
 
-tshark and ANTHROPIC_API_KEY must be available on whatever machine runs this server --
-the frontend never touches either directly.
+tshark must be available on whatever machine runs this server -- the frontend never touches
+it directly. No external API or key is required; narratives are generated locally.
 """
 import os
 import tempfile
@@ -13,8 +13,8 @@ from fastapi.responses import PlainTextResponse
 from .detectors import run_all_detectors
 from .flows import build_flows
 from .models import Thread
+from .narrative import generate_narratives
 from .report import generate_markdown_report
-from .summarize import llm_available, summarize_threads
 from .tshark_runner import extract_packets, find_tshark
 
 MAX_UPLOAD_BYTES = int(os.environ.get("PCAP_AGENT_MAX_UPLOAD_BYTES", 200 * 1024 * 1024))
@@ -78,14 +78,13 @@ def health():
     try:
         tshark_path = find_tshark()
     except FileNotFoundError as e:
-        return {"status": "degraded", "tshark": str(e), "narration_available": llm_available()}
-    return {"status": "ok", "tshark": tshark_path, "narration_available": llm_available()}
+        return {"status": "degraded", "tshark": str(e)}
+    return {"status": "ok", "tshark": tshark_path}
 
 
 @app.post("/analyze")
 async def analyze(
     file: UploadFile = File(...),
-    narrate: bool = Query(True, description="Summarize flagged threads with Claude"),
     format: str = Query("json", pattern="^(json|markdown)$"),
 ):
     path = await _save_upload_to_temp(file)
@@ -100,10 +99,8 @@ async def analyze(
 
         threads = run_all_detectors(flows)
 
-        narration_used = False
-        if threads and narrate and llm_available():
-            summarize_threads(threads)
-            narration_used = True
+        if threads:
+            generate_narratives(threads)
 
         if format == "markdown":
             return PlainTextResponse(generate_markdown_report(threads, source_file=file.filename or "capture"))
@@ -111,7 +108,6 @@ async def analyze(
         return {
             "source_file": file.filename,
             "thread_count": len(threads),
-            "narration_used": narration_used,
             "threads": [_serialize_thread(t) for t in threads],
         }
     finally:
